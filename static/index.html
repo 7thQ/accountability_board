@@ -1,0 +1,237 @@
+<title>Accountability Board</title>
+<style>
+  :root {
+    color-scheme: light dark;
+    --bg: #f4f5f7;
+    --card: #ffffff;
+    --border: #d9dce1;
+    --text: #1f2328;
+    --muted: #6b7280;
+    --accent: #2563eb;
+    --danger: #dc2626;
+    --in: #16a34a;
+    --out: #dc2626;
+  }
+  * { box-sizing: border-box; }
+  body {
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+    background: var(--bg);
+    color: var(--text);
+    margin: 0;
+    padding: 2rem;
+  }
+  h1 { margin: 0 0 1.25rem; font-size: 1.5rem; }
+  .board {
+    background: var(--card);
+    border: 1px solid var(--border);
+    border-radius: 10px;
+    overflow: hidden;
+    max-width: 960px;
+    margin: 0 auto;
+  }
+  table { width: 100%; border-collapse: collapse; }
+  th, td {
+    padding: 0.6rem 0.75rem;
+    text-align: left;
+    border-bottom: 1px solid var(--border);
+    vertical-align: middle;
+  }
+  th {
+    background: #eef0f3;
+    font-size: 0.8rem;
+    text-transform: uppercase;
+    letter-spacing: 0.04em;
+    color: var(--muted);
+  }
+  tr:last-child td { border-bottom: none; }
+  input[type="text"], select, textarea {
+    width: 100%;
+    padding: 0.4rem 0.5rem;
+    border: 1px solid var(--border);
+    border-radius: 6px;
+    font-size: 0.95rem;
+    background: var(--card);
+    color: var(--text);
+    font-family: inherit;
+  }
+  textarea { resize: vertical; min-height: 2.4rem; }
+  select.status-in { color: var(--in); font-weight: 600; }
+  select.status-out { color: var(--out); font-weight: 600; }
+  .col-delete { width: 3rem; text-align: center; }
+  button {
+    cursor: pointer;
+    border: none;
+    border-radius: 6px;
+    padding: 0.45rem 0.9rem;
+    font-size: 0.9rem;
+    font-weight: 500;
+  }
+  .btn-delete {
+    background: transparent;
+    color: var(--danger);
+    font-size: 1.1rem;
+    padding: 0.2rem 0.5rem;
+  }
+  .btn-delete:hover { background: #fee2e2; }
+  .toolbar { padding: 0.75rem; display: flex; justify-content: flex-end; }
+  .btn-add { background: var(--accent); color: white; }
+  .btn-add:hover { background: #1d4ed8; }
+  .empty { color: var(--muted); font-style: italic; padding: 1rem 0.75rem; }
+</style>
+
+<h1>Accountability Board</h1>
+<div class="board">
+  <table>
+    <thead>
+      <tr>
+        <th>Name</th>
+        <th>Shift</th>
+        <th>Status</th>
+        <th>Description</th>
+        <th class="col-delete"></th>
+      </tr>
+    </thead>
+    <tbody id="rows"></tbody>
+  </table>
+  <div class="toolbar">
+    <button class="btn-add" id="addRow">+ Add Row</button>
+  </div>
+</div>
+
+<script>
+  const rowsBody = document.getElementById('rows');
+  const addRowBtn = document.getElementById('addRow');
+  const POLL_INTERVAL_MS = 2000;
+  let debounceTimers = {};
+  let lastRowsJson = null;
+
+  async function fetchRows() {
+    const res = await fetch('/api/rows');
+    const rows = await res.json();
+    lastRowsJson = JSON.stringify(rows);
+    renderRows(rows);
+  }
+
+  // Periodically pull the latest state from the server so changes made
+  // elsewhere (another tab, another device) show up here too. Skipped
+  // while the user is actively editing a cell so we don't yank focus or
+  // clobber an in-progress keystroke, and skipped entirely if nothing
+  // actually changed server-side.
+  async function pollRows() {
+    try {
+      const res = await fetch('/api/rows');
+      const rows = await res.json();
+      const json = JSON.stringify(rows);
+      if (json === lastRowsJson) return;
+      if (rowsBody.contains(document.activeElement)) return;
+      lastRowsJson = json;
+      renderRows(rows);
+    } catch (err) {
+      // Network hiccup / server restart mid-poll; just try again next tick.
+    }
+  }
+  setInterval(pollRows, POLL_INTERVAL_MS);
+
+  function renderRows(rows) {
+    rowsBody.innerHTML = '';
+    if (rows.length === 0) {
+      const tr = document.createElement('tr');
+      tr.innerHTML = '<td colspan="5" class="empty">No entries yet. Click "Add Row" to get started.</td>';
+      rowsBody.appendChild(tr);
+      return;
+    }
+    for (const row of rows) {
+      rowsBody.appendChild(buildRow(row));
+    }
+  }
+
+  function buildRow(row) {
+    const tr = document.createElement('tr');
+    tr.dataset.id = row.id;
+
+    const nameTd = document.createElement('td');
+    const nameInput = document.createElement('input');
+    nameInput.type = 'text';
+    nameInput.value = row.name;
+    nameInput.placeholder = 'Name';
+    nameInput.addEventListener('input', () => scheduleUpdate(row.id, tr));
+    nameTd.appendChild(nameInput);
+
+    const shiftTd = document.createElement('td');
+    const shiftSelect = document.createElement('select');
+    shiftSelect.innerHTML = '<option value="AM">AM</option><option value="PM">PM</option>';
+    shiftSelect.value = row.shift;
+    shiftSelect.addEventListener('change', () => scheduleUpdate(row.id, tr, true));
+    shiftTd.appendChild(shiftSelect);
+
+    const statusTd = document.createElement('td');
+    const statusSelect = document.createElement('select');
+    statusSelect.innerHTML = '<option value="In">In</option><option value="Out">Out</option>';
+    statusSelect.value = row.status;
+    statusSelect.className = row.status === 'In' ? 'status-in' : 'status-out';
+    statusSelect.addEventListener('change', () => {
+      statusSelect.className = statusSelect.value === 'In' ? 'status-in' : 'status-out';
+      scheduleUpdate(row.id, tr, true);
+    });
+    statusTd.appendChild(statusSelect);
+
+    const descTd = document.createElement('td');
+    const descInput = document.createElement('textarea');
+    descInput.value = row.description;
+    descInput.placeholder = 'Notes...';
+    descInput.rows = 1;
+    descInput.addEventListener('input', () => scheduleUpdate(row.id, tr));
+    descTd.appendChild(descInput);
+
+    const deleteTd = document.createElement('td');
+    deleteTd.className = 'col-delete';
+    const deleteBtn = document.createElement('button');
+    deleteBtn.className = 'btn-delete';
+    deleteBtn.textContent = '✕';
+    deleteBtn.title = 'Delete row';
+    deleteBtn.addEventListener('click', () => deleteRow(row.id));
+    deleteTd.appendChild(deleteBtn);
+
+    tr.append(nameTd, shiftTd, statusTd, descTd, deleteTd);
+    return tr;
+  }
+
+  function readRow(tr) {
+    return {
+      name: tr.querySelector('td:nth-child(1) input').value,
+      shift: tr.querySelector('td:nth-child(2) select').value,
+      status: tr.querySelector('td:nth-child(3) select').value,
+      description: tr.querySelector('td:nth-child(4) textarea').value,
+    };
+  }
+
+  function scheduleUpdate(id, tr, immediate) {
+    clearTimeout(debounceTimers[id]);
+    const run = () => updateRow(id, readRow(tr));
+    debounceTimers[id] = setTimeout(run, immediate ? 0 : 400);
+  }
+
+  async function updateRow(id, data) {
+    await fetch(`/api/rows/${id}`, {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(data),
+    });
+  }
+
+  async function deleteRow(id) {
+    await fetch(`/api/rows/${id}`, { method: 'DELETE' });
+    fetchRows();
+  }
+
+  addRowBtn.addEventListener('click', async () => {
+    await fetch('/api/rows', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ name: '', shift: 'AM', status: 'In', description: '' }),
+    });
+    fetchRows();
+  });
+
+  fetchRows();
+</script>

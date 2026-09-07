@@ -1,0 +1,27 @@
+ooo
+o o
+ooo
+---FRAME---
+ ooo 
+o   o
+o   o
+o   o
+ ooo 
+---FRAME---
+  ooo  
+ o   o 
+o     o
+o     o
+o     o
+ o   o 
+  ooo  
+---FRAME---
+  ooooo  
+ oo   oo 
+oo     oo
+o       o
+o       o
+o       o
+oo     oo
+ oo   oo 
+  ooooo  

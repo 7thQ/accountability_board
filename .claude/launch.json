@@ -1,0 +1,11 @@
+{
+  "version": "0.0.1",
+  "configurations": [
+    {
+      "name": "accountability_board",
+      "runtimeExecutable": "bash",
+      "runtimeArgs": ["-c", "export PATH=\"$HOME/.cargo/bin:$PATH\" && cargo run"],
+      "port": 3000
+    }
+  ]
+}

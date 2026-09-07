@@ -77,24 +77,107 @@
   .btn-add { background: var(--accent); color: white; }
   .btn-add:hover { background: #1d4ed8; }
   .empty { color: var(--muted); font-style: italic; padding: 1rem 0.75rem; }
+
+  .page { max-width: 1280px; margin: 0 auto; }
+  .status-bar {
+    position: relative;
+    height: 2.25rem;
+    background: #e5e7eb;
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    overflow: hidden;
+    margin-bottom: 1.25rem;
+  }
+  .status-fill {
+    position: absolute;
+    inset: 0 auto 0 0;
+    width: 0%;
+    background: #7f1d1d;
+    transition: width 0.4s ease, background-color 0.4s ease;
+  }
+  .status-label {
+    position: relative;
+    z-index: 1;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    height: 100%;
+    font-weight: 600;
+    font-size: 0.9rem;
+    color: #fff;
+    text-shadow: 0 1px 2px rgba(0, 0, 0, 0.35);
+  }
+  .layout { display: flex; gap: 1rem; align-items: flex-start; }
+  .board { flex: 3 1 0; margin: 0; max-width: none; }
+  .side-col { flex: 1 1 0; display: flex; flex-direction: column; gap: 1rem; }
+  .art-box {
+    background: var(--card);
+    border: 1px solid var(--border);
+    border-radius: 10px;
+    min-height: 320px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    padding: 0.75rem;
+    overflow: hidden;
+  }
+  .art-frame { display: flex; align-items: center; justify-content: center; width: 100%; height: 100%; }
+  .art-frame img { max-width: 100%; max-height: 300px; object-fit: contain; }
+  .ascii-art {
+    font-family: "SF Mono", Menlo, Consolas, monospace;
+    font-size: 0.75rem;
+    line-height: 1.15;
+    white-space: pre;
+    color: var(--text);
+    margin: 0;
+  }
+  .art-empty { color: var(--muted); font-size: 0.8rem; text-align: center; padding: 1rem; }
+  .qr-box {
+    background: var(--card);
+    border: 1px solid var(--border);
+    border-radius: 10px;
+    padding: 1rem;
+    text-align: center;
+  }
+  .qr-title { font-size: 0.85rem; font-weight: 600; margin-bottom: 0.6rem; }
+  .qr-box img { width: 100%; max-width: 180px; height: auto; margin: 0 auto; display: block; }
+  .qr-url { font-size: 0.75rem; color: var(--muted); margin-top: 0.6rem; word-break: break-all; }
 </style>
 
-<h1>Accountability Board</h1>
-<div class="board">
-  <table>
-    <thead>
-      <tr>
-        <th>Name</th>
-        <th>Shift</th>
-        <th>Status</th>
-        <th>Description</th>
-        <th class="col-delete"></th>
-      </tr>
-    </thead>
-    <tbody id="rows"></tbody>
-  </table>
-  <div class="toolbar">
-    <button class="btn-add" id="addRow">+ Add Row</button>
+<div class="page">
+  <h1>Accountability Board</h1>
+  <div class="status-bar">
+    <div class="status-fill" id="statusFill"></div>
+    <div class="status-label" id="statusLabel">0 / 0 In</div>
+  </div>
+  <div class="layout">
+    <div class="board">
+      <table>
+        <thead>
+          <tr>
+            <th>Name</th>
+            <th>Shift</th>
+            <th>Status</th>
+            <th>Description</th>
+            <th class="col-delete"></th>
+          </tr>
+        </thead>
+        <tbody id="rows"></tbody>
+      </table>
+      <div class="toolbar">
+        <button class="btn-add" id="addRow">+ Add Row</button>
+      </div>
+    </div>
+    <div class="side-col">
+      <div class="art-box">
+        <div class="art-frame" id="artFrame"></div>
+      </div>
+      <div class="qr-box">
+        <div class="qr-title">Scan to open the board on your phone</div>
+        <img src="/api/qr" alt="QR code linking to this board" />
+        <div class="qr-url" id="qrUrl"></div>
+      </div>
+    </div>
   </div>
 </div>
 
@@ -132,7 +215,46 @@
   }
   setInterval(pollRows, POLL_INTERVAL_MS);
 
+  const statusFill = document.getElementById('statusFill');
+  const statusLabel = document.getElementById('statusLabel');
+
+  // Two-segment gradient: dark red at 0%, yellow at 50%, emerald at 100%.
+  function statusColor(pct) {
+    const darkRed = [127, 29, 29];
+    const yellow = [234, 179, 8];
+    const emerald = [16, 185, 129];
+    const [a, b, t] = pct <= 50
+      ? [darkRed, yellow, pct / 50]
+      : [yellow, emerald, (pct - 50) / 50];
+    const mix = (i) => Math.round(a[i] + (b[i] - a[i]) * t);
+    return `rgb(${mix(0)}, ${mix(1)}, ${mix(2)})`;
+  }
+
+  function applyStatusBar(inCount, total) {
+    const pct = total === 0 ? 0 : (inCount / total) * 100;
+    statusFill.style.width = `${pct}%`;
+    statusFill.style.backgroundColor = statusColor(pct);
+    statusLabel.textContent = total === 0
+      ? 'No entries yet'
+      : `${inCount} / ${total} In (${Math.round(pct)}%)`;
+  }
+
+  function updateStatusBar(rows) {
+    const inCount = rows.filter((r) => r.status === 'In').length;
+    applyStatusBar(inCount, rows.length);
+  }
+
+  // Recomputes straight from the on-screen selects so the bar reacts the
+  // instant a status is picked, instead of waiting on the PUT/poll round-trip.
+  function updateStatusBarFromDom() {
+    const selects = rowsBody.querySelectorAll('tr[data-id] td:nth-child(3) select');
+    let inCount = 0;
+    selects.forEach((s) => { if (s.value === 'In') inCount++; });
+    applyStatusBar(inCount, selects.length);
+  }
+
   function renderRows(rows) {
+    updateStatusBar(rows);
     rowsBody.innerHTML = '';
     if (rows.length === 0) {
       const tr = document.createElement('tr');
@@ -171,6 +293,7 @@
     statusSelect.className = row.status === 'In' ? 'status-in' : 'status-out';
     statusSelect.addEventListener('change', () => {
       statusSelect.className = statusSelect.value === 'In' ? 'status-in' : 'status-out';
+      updateStatusBarFromDom();
       scheduleUpdate(row.id, tr, true);
     });
     statusTd.appendChild(statusSelect);
@@ -234,4 +357,88 @@
   });
 
   fetchRows();
+
+  fetch('/api/lan-url')
+    .then((res) => res.json())
+    .then((info) => { document.getElementById('qrUrl').textContent = info.url; })
+    .catch(() => {});
+
+  // Art box: shuffles through images/gifs and ascii-art text files pulled
+  // from the local art/ folder.
+  const artFrame = document.getElementById('artFrame');
+  const ART_DISPLAY_MS = 6000;
+  const ASCII_FRAME_MS = 200;
+  const ART_REFRESH_MS = 60000;
+  let artQueue = [];
+  let artIndex = 0;
+  let asciiFrameTimer = null;
+
+  function shuffle(arr) {
+    for (let i = arr.length - 1; i > 0; i--) {
+      const j = Math.floor(Math.random() * (i + 1));
+      [arr[i], arr[j]] = [arr[j], arr[i]];
+    }
+    return arr;
+  }
+
+  async function loadArtQueue() {
+    try {
+      const res = await fetch('/api/art');
+      const items = await res.json();
+      artQueue = shuffle(items);
+      artIndex = 0;
+    } catch (err) {
+      artQueue = [];
+    }
+  }
+
+  async function showNextArt() {
+    clearInterval(asciiFrameTimer);
+    if (artQueue.length === 0) {
+      artFrame.innerHTML = '<div class="art-empty">Drop .gif or .txt art into the art/ folder</div>';
+      return;
+    }
+    if (artIndex >= artQueue.length) {
+      artQueue = shuffle(artQueue);
+      artIndex = 0;
+    }
+    const item = artQueue[artIndex++];
+    artFrame.innerHTML = '';
+
+    if (item.kind === 'image') {
+      const img = document.createElement('img');
+      img.src = `/art/${encodeURIComponent(item.name)}`;
+      img.alt = item.name;
+      artFrame.appendChild(img);
+      return;
+    }
+
+    try {
+      const res = await fetch(`/art/${encodeURIComponent(item.name)}`);
+      const text = await res.text();
+      const frames = text.split(/\r?\n?---FRAME---\r?\n?/).map((f) => f.trim()).filter(Boolean);
+      const pre = document.createElement('pre');
+      pre.className = 'ascii-art';
+      artFrame.appendChild(pre);
+      pre.textContent = frames[0] || text;
+      if (frames.length > 1) {
+        let frameIdx = 0;
+        asciiFrameTimer = setInterval(() => {
+          frameIdx = (frameIdx + 1) % frames.length;
+          pre.textContent = frames[frameIdx];
+        }, ASCII_FRAME_MS);
+      }
+    } catch (err) {
+      artFrame.innerHTML = '';
+    }
+  }
+
+  async function initArt() {
+    await loadArtQueue();
+    showNextArt();
+    setInterval(showNextArt, ART_DISPLAY_MS);
+    setInterval(loadArtQueue, ART_REFRESH_MS);
+  }
+
+  initArt();
 </script>
